@@ -6,7 +6,7 @@ from worship_song_selector.auth import Role, resolve_role
 from worship_song_selector.config import load_config
 from worship_song_selector.import_ui import render_import_tab
 from worship_song_selector.library_ui import render_library_tab
-from worship_song_selector.recommend_ui import render_recommend_tab
+from worship_song_selector.recommend_ui import clear_recommend_session_state, render_recommend_tab
 from worship_song_selector.settings_ui import render_settings_tab
 from worship_song_selector.songs import create_supabase_client
 
@@ -26,6 +26,8 @@ def current_role() -> Role | None:
 
 
 def set_role(role: Role | None) -> None:
+    if role is None:
+        clear_recommend_session_state()
     st.session_state[SESSION_ROLE_KEY] = role.value if role is not None else None
 
 

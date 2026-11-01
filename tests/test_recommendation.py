@@ -142,3 +142,184 @@ def test_recommend_set_returns_none_after_exhausted_retries():
         max_attempts=2,
     )
     assert result is None
+
+
+def test_build_messages_include_locked_and_excluded_instructions():
+    songs = [_song(title=f"S{i}") for i in range(6)]
+    locked_id = songs[2]["id"]
+    excluded_id = songs[5]["id"]
+    messages = build_recommendation_messages(
+        theme="Тема",
+        flow_slots=default_flow_template(),
+        songs=songs,
+        locked_by_slot={1: locked_id},
+        excluded_ids={excluded_id},
+    )
+    user = messages[1]["content"]
+    assert locked_id in user
+    assert excluded_id in user
+    assert "заключ" in user.lower() or "locked" in user.lower() or "слот 2" in user.lower()
+    assert excluded_id not in _catalog_ids_in_user_message(user)
+
+
+def _catalog_ids_in_user_message(user: str) -> set[str]:
+    marker = "Каталог на анализирани песни (JSON):"
+    payload = user.split(marker, 1)[1].strip()
+    catalog = json.loads(payload)
+    return {entry["id"] for entry in catalog}
+
+
+def test_parse_rejects_excluded_song_id():
+    ids = [str(uuid.uuid4()) for _ in range(6)]
+    excluded = ids[5]
+    valid_ids = set(ids)
+    payload = {
+        "picks": [
+            {"song_id": ids[0], "reason": "A."},
+            {"song_id": ids[1], "reason": "B."},
+            {"song_id": ids[2], "reason": "C."},
+            {"song_id": ids[3], "reason": "D."},
+            {"song_id": excluded, "reason": "E."},
+        ],
+    }
+    with pytest.raises(RecommendationValidationError):
+        parse_recommendation_response(
+            json.dumps(payload),
+            valid_ids=valid_ids,
+            excluded_ids={excluded},
+        )
+
+
+def test_parse_rejects_locked_slot_change():
+    ids = [str(uuid.uuid4()) for _ in range(5)]
+    valid_ids = set(ids)
+    payload = {
+        "picks": [
+            {"song_id": ids[0], "reason": "A."},
+            {"song_id": ids[4], "reason": "B."},
+            {"song_id": ids[2], "reason": "C."},
+            {"song_id": ids[3], "reason": "D."},
+            {"song_id": ids[4], "reason": "E."},
+        ],
+    }
+    with pytest.raises(RecommendationValidationError):
+        parse_recommendation_response(
+            json.dumps(payload),
+            valid_ids=valid_ids,
+            locked_by_slot={1: ids[1]},
+        )
+
+
+def test_parse_replace_requires_other_slots_unchanged():
+    ids = [str(uuid.uuid4()) for _ in range(6)]
+    valid_ids = set(ids)
+    replace_slot = 2
+    rejected = ids[replace_slot]
+    replacement = ids[5]
+    payload = {
+        "picks": [
+            {"song_id": ids[0], "reason": "A."},
+            {"song_id": ids[1], "reason": "B."},
+            {"song_id": replacement, "reason": "C."},
+            {"song_id": ids[3], "reason": "D."},
+            {"song_id": ids[4], "reason": "E."},
+        ],
+    }
+    result = parse_recommendation_response(
+        json.dumps(payload),
+        valid_ids=valid_ids,
+        excluded_ids={rejected},
+        required_by_slot={
+            0: ids[0],
+            1: ids[1],
+            3: ids[3],
+            4: ids[4],
+        },
+        replace_slot=replace_slot,
+        replace_rejected_id=rejected,
+    )
+    assert result[replace_slot].song_id == replacement
+
+
+def test_parse_replace_rejects_same_song():
+    ids = [str(uuid.uuid4()) for _ in range(5)]
+    valid_ids = set(ids)
+    replace_slot = 2
+    rejected = ids[replace_slot]
+    payload = {
+        "picks": [
+            {"song_id": ids[0], "reason": "A."},
+            {"song_id": ids[1], "reason": "B."},
+            {"song_id": rejected, "reason": "C."},
+            {"song_id": ids[3], "reason": "D."},
+            {"song_id": ids[4], "reason": "E."},
+        ],
+    }
+    with pytest.raises(RecommendationValidationError):
+        parse_recommendation_response(
+            json.dumps(payload),
+            valid_ids=valid_ids,
+            excluded_ids={rejected},
+            required_by_slot={0: ids[0], 1: ids[1], 3: ids[3], 4: ids[4]},
+            replace_slot=replace_slot,
+            replace_rejected_id=rejected,
+        )
+
+
+def test_recommend_set_retries_when_locked_slot_violated():
+    songs = [_song() for _ in range(6)]
+    valid_ids = {s["id"] for s in songs}
+    locked_slot = 0
+    locked_id = songs[0]["id"]
+    calls: list[int] = []
+
+    def completion(messages):
+        calls.append(1)
+        if len(calls) == 1:
+            picks = [{"song_id": s["id"], "reason": f"R{i}."} for i, s in enumerate(songs[:5], 1)]
+            picks[locked_slot] = {"song_id": songs[5]["id"], "reason": "Bad."}
+            return json.dumps({"picks": picks})
+        picks = [{"song_id": s["id"], "reason": f"R{i}."} for i, s in enumerate(songs[:5], 1)]
+        return json.dumps({"picks": picks})
+
+    result = recommend_set_with_completion(
+        completion,
+        theme="Тема",
+        flow_slots=default_flow_template(),
+        songs=songs,
+        valid_ids=valid_ids,
+        locked_by_slot={locked_slot: locked_id},
+        max_attempts=2,
+    )
+    assert result is not None
+    assert result[locked_slot].song_id == locked_id
+    assert len(calls) == 2
+
+
+def test_recommend_set_retries_when_excluded_song_returned():
+    songs = [_song() for _ in range(6)]
+    valid_ids = {s["id"] for s in songs}
+    excluded_id = songs[5]["id"]
+    calls: list[int] = []
+
+    def completion(messages):
+        calls.append(1)
+        if len(calls) == 1:
+            picks = [{"song_id": s["id"], "reason": f"R{i}."} for i, s in enumerate(songs[:5], 1)]
+            picks[3] = {"song_id": excluded_id, "reason": "Bad."}
+            return json.dumps({"picks": picks})
+        picks = [{"song_id": s["id"], "reason": f"R{i}."} for i, s in enumerate(songs[:5], 1)]
+        return json.dumps({"picks": picks})
+
+    result = recommend_set_with_completion(
+        completion,
+        theme="Тема",
+        flow_slots=default_flow_template(),
+        songs=songs,
+        valid_ids=valid_ids,
+        excluded_ids={excluded_id},
+        max_attempts=2,
+    )
+    assert result is not None
+    assert excluded_id not in {pick.song_id for pick in result}
+    assert len(calls) == 2
