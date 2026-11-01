@@ -13,6 +13,7 @@ from worship_song_selector.flow_settings import (
     save_flow_template,
     slot_energy_from_energies,
 )
+from worship_song_selector.model_eval_ui import render_model_eval_helper
 from worship_song_selector.recommendation import FlowSlot
 from worship_song_selector.songs import list_songs_for_reanalysis
 
@@ -108,6 +109,9 @@ def _render_flow_template_editor(client: Client) -> None:
 def render_settings_tab(client: Client, openai_config: OpenAIConfig) -> None:
     st.subheader("Настройки")
     _render_flow_template_editor(client)
+
+    st.divider()
+    render_model_eval_helper(client, openai_config)
 
     st.divider()
     st.markdown("**Повторен AI анализ**")

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from worship_song_selector.openai_metrics import OpenAIUsageRecord, UsageCallback
 
 Energy = Literal["fast", "medium", "slow"]
 
@@ -127,17 +130,33 @@ def analyze_song_with_completion(
     return None
 
 
-def make_openai_completion_fn(*, api_key: str, model: str) -> CompletionFn:
+def make_openai_completion_fn(
+    *,
+    api_key: str,
+    model: str,
+    on_usage: UsageCallback | None = None,
+) -> CompletionFn:
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key)
 
     def complete(messages: list[dict[str, str]]) -> str:
+        started = time.perf_counter()
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             response_format={"type": "json_object"},
         )
+        latency = time.perf_counter() - started
+        usage = response.usage
+        if on_usage is not None and usage is not None:
+            on_usage(
+                OpenAIUsageRecord(
+                    prompt_tokens=int(usage.prompt_tokens or 0),
+                    completion_tokens=int(usage.completion_tokens or 0),
+                    latency_seconds=latency,
+                ),
+            )
         return response.choices[0].message.content or ""
 
     return complete

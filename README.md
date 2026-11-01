@@ -75,6 +75,22 @@ pytest
 
 Passcode verification and role resolution are covered in `tests/test_auth.py`. The lyric parser (Worship Tools `v1` / `Verse 1`, ProPresenter `slide1`, chord and `{comment}` stripping, unknown-marker detection, and saved marker aliases) and title normalization have fixture tests in `tests/test_parser.py` and `tests/test_songs.py`.
 
+### Model quality evaluation (issue 13)
+
+Before importing the full song library (~400 songs), run a human go/no-go on analysis and recommendations:
+
+1. Import and analyse **10–20** representative real songs (Import tab).
+2. Exercise **5–10** service themes on the **Препоръка** tab and judge quality in Bulgarian.
+3. Measure tokens and latency (Admin → **Настройки** shows a rough token estimate; exact numbers from the script):
+
+   ```bash
+   python scripts/model_quality_eval.py --analysis-sample 5
+   ```
+
+   Paste the printed markdown into `.scratch/worship-song-selector/issues/13-model-quality-evaluation.md` under **Comments**, fill in the human verdict, and decide whether to keep `gpt-4o-mini` or change `[openai].model` in secrets.
+
+Optional: `--themes-file path.txt` (one theme per line), `--max-themes N`, `--skip-recommendations`, `--compare-model gpt-4o` to print a second report for an alternate model.
+
 ## Production deployment checklist
 
 Issue **02** — complete these steps on your accounts. The repo includes [`.github/workflows/supabase-keepalive.yml`](.github/workflows/supabase-keepalive.yml) and [`scripts/supabase_keepalive.py`](scripts/supabase_keepalive.py); you wire up the cloud services and secrets.
