@@ -55,6 +55,10 @@ For marker alias persistence (import preview), also apply:
 
 - File: [`supabase/migrations/002_marker_aliases.sql`](supabase/migrations/002_marker_aliases.sql)
 
+For the editable flow template (Settings tab), also apply:
+
+- File: [`supabase/migrations/003_settings.sql`](supabase/migrations/003_settings.sql)
+
 ### Run the app
 
 ```bash

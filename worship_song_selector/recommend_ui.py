@@ -9,11 +9,11 @@ import streamlit.components.v1 as components
 from supabase import Client
 
 from worship_song_selector.config import OpenAIConfig
+from worship_song_selector.flow_settings import fetch_flow_template
 from worship_song_selector.library_ui import ENERGY_LABELS
 from worship_song_selector.recommendation import (
     FlowSlot,
     RecommendationPick,
-    default_flow_template,
     recommend_set_with_completion,
 )
 from worship_song_selector.song_analysis import make_openai_completion_fn
@@ -141,6 +141,7 @@ def _copy_titles_to_clipboard(text: str) -> None:
 def _run_completion(
     *,
     theme: str,
+    flow_slots: list[FlowSlot],
     songs: list[dict[str, Any]],
     openai_config: OpenAIConfig,
     locked_by_slot: dict[int, str] | None = None,
@@ -149,7 +150,6 @@ def _run_completion(
     replace_slot: int | None = None,
     replace_rejected_id: str | None = None,
 ) -> list[RecommendationPick] | None:
-    flow_slots = default_flow_template()
     valid_ids = {str(s["id"]) for s in songs}
     completion = make_openai_completion_fn(
         api_key=openai_config.api_key,
@@ -175,11 +175,18 @@ def render_recommend_tab(client: Client, openai_config: OpenAIConfig) -> None:
         "Въведете тема, откъс или бележки — ще получите 5 песни от библиотеката.",
     )
 
+    flow_slots: list[FlowSlot] | None = None
     try:
         catalogue_songs = list_analysed_songs_for_recommendation(client)
     except Exception as exc:
         st.error(f"Неуспешна връзка с базата данни: {exc}")
         catalogue_songs = []
+    else:
+        try:
+            flow_slots = fetch_flow_template(client)
+        except Exception as exc:
+            st.error(f"Неуспешно зареждане на шаблон за поток: {exc}")
+            flow_slots = None
 
     title_by_id = {
         str(song["id"]): str(song.get("title") or song["id"]) for song in catalogue_songs
@@ -220,13 +227,16 @@ def render_recommend_tab(client: Client, openai_config: OpenAIConfig) -> None:
                 f"(налични: {len(catalogue_songs)}).",
             )
             return
+        if flow_slots is None:
+            st.error("Липсва шаблон за поток.")
+            return
 
-        flow_slots = default_flow_template()
         excluded = _excluded_ids()
         started = time.perf_counter()
         with st.spinner("Генериране…"):
             picks = _run_completion(
                 theme=theme,
+                flow_slots=flow_slots,
                 songs=catalogue_songs,
                 openai_config=openai_config,
                 excluded_ids=excluded,
@@ -264,9 +274,8 @@ def render_recommend_tab(client: Client, openai_config: OpenAIConfig) -> None:
 
     theme_for_refine = str(st.session_state.get(SESSION_RECOMMEND_THEME_KEY, "")).strip()
     picks = _picks_from_session()
-    flow_slots = default_flow_template()
 
-    if regenerate_clicked and picks and theme_for_refine:
+    if regenerate_clicked and picks and theme_for_refine and flow_slots is not None:
         if not openai_config.api_key:
             st.error("Липсва OpenAI API ключ в secrets.")
         elif len(catalogue_songs) < 5:
@@ -277,6 +286,7 @@ def render_recommend_tab(client: Client, openai_config: OpenAIConfig) -> None:
             with st.spinner("Прегенериране…"):
                 new_picks = _run_completion(
                     theme=theme_for_refine,
+                    flow_slots=flow_slots,
                     songs=catalogue_songs,
                     openai_config=openai_config,
                     locked_by_slot=locked or None,
@@ -321,6 +331,8 @@ def render_recommend_tab(client: Client, openai_config: OpenAIConfig) -> None:
                     st.error("Липсва активен сет.")
                 elif not openai_config.api_key:
                     st.error("Липсва OpenAI API ключ в secrets.")
+                elif flow_slots is None:
+                    st.error("Липсва шаблон за поток.")
                 else:
                     rejected_id = str(row["song_id"])
                     excluded = _excluded_ids() | {rejected_id}
@@ -330,6 +342,7 @@ def render_recommend_tab(client: Client, openai_config: OpenAIConfig) -> None:
                     with st.spinner("Смяна…"):
                         new_picks = _run_completion(
                             theme=theme_for_refine,
+                            flow_slots=flow_slots,
                             songs=catalogue_songs,
                             openai_config=openai_config,
                             locked_by_slot=_locked_by_slot(picks) or None,
