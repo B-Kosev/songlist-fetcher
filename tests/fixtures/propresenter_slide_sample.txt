@@ -1,0 +1,15 @@
+Title: Свят свят свят
+Author: Тестов автор
+
+ProPresenter 7 — song export
+Arrangement: Default
+Key: D
+Tempo: 72
+
+slide1
+Свят, свят, свят {бавно}
+Господ Бог всемогъщ
+Chorus
+Светлината на света
+slide2
+Агнец Божий {repeat x2}

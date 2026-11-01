@@ -4,8 +4,17 @@ import re
 from dataclasses import dataclass
 
 CHORD_PATTERN = re.compile(r"\s*\[[^\]]*\]")
+COMMENT_PATTERN = re.compile(r"\{[^}]*\}")
 TITLE_LINE = re.compile(r"^(?:title|заглавие)\s*:\s*(.+)$", re.IGNORECASE)
 AUTHOR_LINE = re.compile(r"^(?:author|автор)\s*:\s*(.+)$", re.IGNORECASE)
+NOISE_LINE = re.compile(
+    r"^(?:"
+    r"worship\s*tools|worshiptools|planning\s+export|ccli|song\s*#|song\s*id|"
+    r"propresenter|arrangement|category|version|"
+    r"key|tempo|bpm|time\s*signature|length"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -28,6 +37,14 @@ def strip_chord_brackets(line: str) -> str:
     return CHORD_PATTERN.sub("", line)
 
 
+def strip_curly_brace_comments(line: str) -> str:
+    return COMMENT_PATTERN.sub("", line)
+
+
+def _clean_lyric_line(line: str) -> str:
+    return strip_curly_brace_comments(strip_chord_brackets(line)).rstrip()
+
+
 def sections_to_lyrics_payload(sections: list[LyricSection]) -> list[dict]:
     payload: list[dict] = []
     for section in sections:
@@ -43,6 +60,20 @@ def sections_to_lyrics_payload(sections: list[LyricSection]) -> list[dict]:
     return payload
 
 
+def _compact_marker_key(line: str) -> str:
+    return re.sub(r"[\s_-]+", "", line.casefold())
+
+
+def _parse_number_suffix(compact: str, prefix: str) -> int | None:
+    if compact == prefix:
+        return None
+    if compact.startswith(prefix):
+        suffix = compact[len(prefix) :]
+        if suffix.isdigit():
+            return int(suffix)
+    return None
+
+
 def _parse_marker_line(line: str) -> tuple[str, int | None, str] | None:
     stripped = line.strip()
     if not stripped:
@@ -53,6 +84,8 @@ def _parse_marker_line(line: str) -> tuple[str, int | None, str] | None:
         return None
 
     lower = stripped.casefold()
+    compact = _compact_marker_key(stripped)
+
     verse_match = re.fullmatch(r"v(\d+)", lower)
     if verse_match:
         number = int(verse_match.group(1))
@@ -61,25 +94,52 @@ def _parse_marker_line(line: str) -> tuple[str, int | None, str] | None:
     if lower == "v":
         return ("verse", 1, stripped)
 
-    chorus_match = re.fullmatch(r"c(\d*)", lower)
-    if chorus_match:
+    slide_match = re.fullmatch(r"slide(\d+)", compact)
+    if slide_match:
+        number = int(slide_match.group(1))
+        return ("verse", number, stripped)
+
+    verse_number = _parse_number_suffix(compact, "verse")
+    if verse_number is not None or compact == "verse":
+        number = verse_number if verse_number is not None else 1
+        return ("verse", number, stripped)
+
+    chorus_number = _parse_number_suffix(compact, "chorus")
+    if chorus_number is not None or compact == "chorus":
+        return ("chorus", chorus_number, stripped)
+
+    bridge_number = _parse_number_suffix(compact, "bridge")
+    if bridge_number is not None or compact == "bridge":
+        return ("bridge", bridge_number, stripped)
+
+    if compact in {"pc", "prechorus"}:
+        return ("pre_chorus", None, stripped)
+
+    if compact in {"t", "tag", "ending"}:
+        return ("tag", None, stripped)
+
+    if chorus_match := re.fullmatch(r"c(\d*)", lower):
         number_str = chorus_match.group(1)
         number = int(number_str) if number_str else None
         return ("chorus", number, stripped)
 
-    bridge_match = re.fullmatch(r"b(\d*)", lower)
-    if bridge_match:
+    if bridge_match := re.fullmatch(r"b(\d*)", lower):
         number_str = bridge_match.group(1)
         number = int(number_str) if number_str else None
         return ("bridge", number, stripped)
 
-    if lower in {"pc", "pre-chorus", "pre_chorus", "prechorus"}:
-        return ("pre_chorus", None, stripped)
-
-    if lower in {"t", "tag"}:
-        return ("tag", None, stripped)
-
     return None
+
+
+def _is_noise_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if NOISE_LINE.match(stripped):
+        return True
+    if re.fullmatch(r"ccli\s+song\s*#\s*:\s*\d+", stripped, re.IGNORECASE):
+        return True
+    return False
 
 
 def parse_song_text(raw_text: str, *, filename_stem: str) -> ParsedSong:
@@ -106,6 +166,9 @@ def parse_song_text(raw_text: str, *, filename_stem: str) -> ParsedSong:
     current: LyricSection | None = None
 
     for line in body_lines:
+        if _is_noise_line(line):
+            continue
+
         marker = _parse_marker_line(line)
         if marker is not None:
             section_type, number, marker_text = marker
@@ -121,8 +184,7 @@ def parse_song_text(raw_text: str, *, filename_stem: str) -> ParsedSong:
         if current is None:
             continue
 
-        lyric_line = strip_chord_brackets(line)
-        current.lines.append(lyric_line)
+        current.lines.append(_clean_lyric_line(line))
 
     return ParsedSong(
         title=title,
