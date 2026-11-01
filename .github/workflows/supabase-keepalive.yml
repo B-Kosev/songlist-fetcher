@@ -1,0 +1,26 @@
+name: Supabase keep-alive
+
+on:
+  schedule:
+    # Roughly every three days (UTC); Supabase free tier pauses after prolonged inactivity.
+    - cron: "0 9 1,4,7,10,13,16,19,22,25,28 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install app dependencies
+        run: pip install -e .
+
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/supabase_keepalive.py

@@ -66,3 +66,47 @@ pytest
 ```
 
 Passcode verification and role resolution are covered in `tests/test_auth.py`.
+
+## Production deployment checklist
+
+Issue **02** — complete these steps on your accounts. The repo includes [`.github/workflows/supabase-keepalive.yml`](.github/workflows/supabase-keepalive.yml) and [`scripts/supabase_keepalive.py`](scripts/supabase_keepalive.py); you wire up the cloud services and secrets.
+
+### 1. Supabase (production)
+
+1. Create a Supabase project (or designate your existing production project).
+2. In the SQL editor, run [`supabase/migrations/001_songs.sql`](supabase/migrations/001_songs.sql).
+3. Note **Project URL** and the **anon** key (for the Streamlit app). For GitHub keep-alive, prefer the **service role** key so the scheduled query is not blocked by future RLS policies.
+
+### 2. Streamlit Community Cloud
+
+1. Push this repository to GitHub (if not already).
+2. Open [Streamlit Community Cloud](https://share.streamlit.io/) → **Create app** → connect the repo.
+3. Set **Main file path** to `app.py` and Python **3.11**.
+4. Under **Advanced settings → Secrets**, paste TOML matching [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example):
+
+   - `team_passcode_hash` / `admin_passcode_hash` — SHA-256 hex digests of your production passcodes (same generator as local setup).
+   - `[supabase]` — production `url` and `key` (anon key is typical for the app).
+   - `[openai]` — see step 3 below.
+
+5. Deploy and open the public URL. Confirm the passcode gate, then **Библиотека** shows a song count (e.g. `0 songs` on an empty table).
+
+### 3. OpenAI (for later tickets)
+
+1. In the [OpenAI dashboard](https://platform.openai.com/), create an API key for this app.
+2. Set a **hard monthly spend limit** (PRD suggests e.g. **$5**).
+3. Add the key to Streamlit Cloud secrets under `[openai]` → `api_key`. The walking skeleton does not call OpenAI yet; this avoids redeploying when LLM features land.
+
+### 4. GitHub Actions keep-alive
+
+1. In the GitHub repo → **Settings → Secrets and variables → Actions**, add:
+
+   | Secret | Value |
+   |--------|--------|
+   | `SUPABASE_URL` | Production project URL |
+   | `SUPABASE_KEY` | Service role key (recommended) or anon key if reads are allowed |
+
+2. Push the workflow to the default branch so Actions can run it.
+3. **Actions → Supabase keep-alive → Run workflow** (manual). The job should print `keepalive ok: songs count=…`.
+4. In Supabase → **Logs** (or API logs), confirm a `GET`/`HEAD` against `songs` around that time.
+
+The workflow also runs on a cron schedule (~every three days) so the free-tier project is not paused for inactivity.
