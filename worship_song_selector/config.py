@@ -18,13 +18,21 @@ class SupabaseConfig:
 
 
 @dataclass(frozen=True)
+class OpenAIConfig:
+    api_key: str
+    model: str = "gpt-4o-mini"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     auth: AuthConfig
     supabase: SupabaseConfig
+    openai: OpenAIConfig
 
 
 def load_config() -> AppConfig:
     secrets = st.secrets
+    openai_raw = secrets.get("openai", {})
     return AppConfig(
         auth=AuthConfig(
             team_passcode_hash=str(secrets["team_passcode_hash"]),
@@ -33,5 +41,9 @@ def load_config() -> AppConfig:
         supabase=SupabaseConfig(
             url=str(secrets["supabase"]["url"]),
             key=str(secrets["supabase"]["key"]),
+        ),
+        openai=OpenAIConfig(
+            api_key=str(openai_raw.get("api_key", "")),
+            model=str(openai_raw.get("model", "gpt-4o-mini")),
         ),
     )

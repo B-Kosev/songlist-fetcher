@@ -51,6 +51,20 @@ def render_recommend_tab() -> None:
     st.info("Генерирането на сетове ще бъде добавено в следващите версии.")
 
 
+def _format_song_line(song: dict) -> str:
+    title = song["title"]
+    author = song.get("author") or "—"
+    status = song.get("analysis_status")
+    if status == "done":
+        energy = song.get("energy") or "—"
+        tags = song.get("tags") or []
+        tag_str = ", ".join(tags) if tags else "—"
+        return f"**{title}** — {author} · {energy} · {tag_str}"
+    if status == "failed":
+        return f"**{title}** — {author} · анализ неуспешен"
+    return f"**{title}** — {author} · чака анализ"
+
+
 def render_library_tab() -> None:
     st.subheader("Библиотека")
     config = load_config()
@@ -65,14 +79,13 @@ def render_library_tab() -> None:
         return
     st.caption(f"{len(songs)} songs")
     for song in songs:
-        author = song.get("author") or "—"
-        st.write(f"**{song['title']}** — {author}")
+        st.markdown(_format_song_line(song))
 
 
 def render_admin_import_tab() -> None:
     config = load_config()
     client = create_supabase_client(config.supabase)
-    render_import_tab(client)
+    render_import_tab(client, config.openai)
 
 
 def render_settings_tab() -> None:

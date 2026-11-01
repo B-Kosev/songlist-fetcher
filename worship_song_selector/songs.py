@@ -5,6 +5,7 @@ from typing import Any
 from supabase import Client, create_client
 
 from worship_song_selector.config import SupabaseConfig
+from worship_song_selector.song_analysis import SongAnalysis
 from worship_song_selector.titles import normalize_title
 
 
@@ -26,17 +27,49 @@ def count_songs(client: Client) -> int:
 def list_songs(client: Client) -> list[dict[str, Any]]:
     response = (
         client.table("songs")
-        .select("id, title, author")
+        .select("id, title, author, energy, tags, analysis_status")
         .order("title")
         .execute()
     )
     return list(response.data or [])
 
 
-def insert_songs(client: Client, rows: list[dict[str, Any]]) -> None:
+def insert_songs(client: Client, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
+        return []
+    response = client.table("songs").insert(rows).execute()
+    return list(response.data or [])
+
+
+def fetch_songs_needing_analysis(client: Client) -> list[dict[str, Any]]:
+    response = (
+        client.table("songs")
+        .select("id, title, author, lyrics, analysis_status")
+        .in_("analysis_status", ["pending", "failed"])
+        .order("title")
+        .execute()
+    )
+    return list(response.data or [])
+
+
+def save_analysis_result(
+    client: Client,
+    song_id: str,
+    *,
+    analysis: SongAnalysis | None,
+) -> None:
+    if analysis is None:
+        client.table("songs").update({"analysis_status": "failed"}).eq("id", song_id).execute()
         return
-    client.table("songs").insert(rows).execute()
+    client.table("songs").update(
+        {
+            "tags": analysis.tags,
+            "scripture_refs": analysis.scripture_refs,
+            "energy": analysis.energy,
+            "summary": analysis.summary,
+            "analysis_status": "done",
+        },
+    ).eq("id", song_id).execute()
 
 
 def build_song_row(

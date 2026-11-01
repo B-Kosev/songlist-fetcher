@@ -6,6 +6,11 @@ from typing import Any
 import streamlit as st
 from supabase import Client
 
+from worship_song_selector.analysis_ui import (
+    render_analyse_pending_control,
+    run_song_analysis_batch,
+)
+from worship_song_selector.config import OpenAIConfig
 from worship_song_selector.marker_aliases import fetch_marker_aliases, upsert_marker_aliases
 from worship_song_selector.parser import marker_alias_key, parse_song_text, sections_to_lyrics_payload
 from worship_song_selector.songs import build_song_row, insert_songs
@@ -121,8 +126,9 @@ def _batch_unknown_markers(batch: list[ImportDraft]) -> frozenset[str]:
     return frozenset(unknown)
 
 
-def render_import_tab(client: Client) -> None:
+def render_import_tab(client: Client, openai_config: OpenAIConfig) -> None:
     st.subheader("Импорт")
+    render_analyse_pending_control(client, openai_config)
     st.caption(
         "Качете един или повече `.txt` файла (една песен на файл). "
         "Нищо не се записва, докато не потвърдите.",
@@ -238,14 +244,20 @@ def render_import_tab(client: Client) -> None:
                 for item in batch
             ]
             try:
-                insert_songs(client, rows)
+                inserted = insert_songs(client, rows)
                 if pending_aliases:
                     upsert_marker_aliases(client, pending_aliases)
             except Exception as exc:
                 st.error(f"Неуспешен запис в базата: {exc}")
             else:
+                done, failed = run_song_analysis_batch(client, inserted, openai_config)
                 _clear_import_session()
-                st.success(f"Записани са {len(rows)} песни.")
+                msg = f"Записани са {len(rows)} песни."
+                if done or failed:
+                    msg += f" Анализ: {done} готови, {failed} неуспешни."
+                elif inserted:
+                    msg += " Анализът не стартира (проверете OpenAI secrets)."
+                st.success(msg)
                 st.rerun()
     with cancel_col:
         if st.button("Отказ"):
