@@ -12,11 +12,20 @@ from worship_song_selector.analysis_ui import (
 )
 from worship_song_selector.config import OpenAIConfig
 from worship_song_selector.marker_aliases import fetch_marker_aliases, upsert_marker_aliases
+from worship_song_selector.import_matching import (
+    batch_duplicate_normalized_titles,
+    import_action_preview_label,
+    plan_import_actions,
+    resolve_import_action,
+)
 from worship_song_selector.parser import marker_alias_key, parse_song_text, sections_to_lyrics_payload
-from worship_song_selector.songs import build_song_row, insert_songs
+from worship_song_selector.songs import apply_import_actions, fetch_songs_for_import
+from worship_song_selector.titles import normalize_title
 
 IMPORT_BATCH_KEY = "import_batch"
 IMPORT_PENDING_ALIASES_KEY = "import_pending_marker_aliases"
+MATCH_OVERRIDE_AUTO = "__auto__"
+MATCH_OVERRIDE_NEW = "new"
 
 MARKER_MAPPING_CHOICES: list[tuple[str, str]] = [
     ("", "— изберете —"),
@@ -38,6 +47,64 @@ class ImportDraft:
     author: str
     lyrics: list[dict[str, Any]]
     unknown_markers: frozenset[str] = field(default_factory=frozenset)
+    match_override: str | None = None
+
+
+def _draft_normalized_title(draft: ImportDraft) -> str:
+    display_title = draft.title.strip() or _filename_stem(draft.filename)
+    return normalize_title(display_title)
+
+
+def _import_match_maps(
+    existing_songs: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    by_normalized = {song["normalized_title"]: song for song in existing_songs}
+    by_id = {song["id"]: song for song in existing_songs}
+    return by_normalized, by_id
+
+
+def _draft_import_payload(draft: ImportDraft) -> dict[str, Any]:
+    display_title = draft.title.strip() or _filename_stem(draft.filename)
+    return {
+        "title": display_title,
+        "normalized_title": normalize_title(display_title),
+        "author": draft.author.strip() or None,
+        "lyrics": draft.lyrics,
+        "raw_text": draft.raw_text,
+        "override": draft.match_override,
+    }
+
+
+def _batch_duplicate_titles(batch: list[ImportDraft]) -> frozenset[str]:
+    return batch_duplicate_normalized_titles([_draft_normalized_title(d) for d in batch])
+
+
+def _match_override_options(existing_songs: list[dict[str, Any]]) -> list[str]:
+    return [MATCH_OVERRIDE_AUTO, MATCH_OVERRIDE_NEW, *[song["id"] for song in existing_songs]]
+
+
+def _match_override_label(
+    value: str,
+    existing_songs_by_id: dict[str, dict[str, Any]],
+) -> str:
+    if value == MATCH_OVERRIDE_AUTO:
+        return "Автоматично"
+    if value == MATCH_OVERRIDE_NEW:
+        return "Принуди като нова"
+    song = existing_songs_by_id.get(value)
+    if song:
+        return f"Обнови: {song['title']}"
+    return value
+
+
+def _match_override_index(options: list[str], override: str | None) -> int:
+    if override is None:
+        desired = MATCH_OVERRIDE_AUTO
+    elif override == MATCH_OVERRIDE_NEW:
+        desired = MATCH_OVERRIDE_NEW
+    else:
+        desired = override
+    return options.index(desired) if desired in options else 0
 
 
 def _filename_stem(filename: str) -> str:
@@ -190,6 +257,18 @@ def render_import_tab(client: Client, openai_config: OpenAIConfig) -> None:
             _refresh_batch(batch, merged_aliases)
             st.rerun()
 
+    existing_songs = fetch_songs_for_import(client)
+    existing_by_normalized, existing_by_id = _import_match_maps(existing_songs)
+    duplicate_norms = _batch_duplicate_titles(batch)
+    if duplicate_norms:
+        shown = ", ".join(sorted(duplicate_norms))
+        st.error(
+            "В партидата има повече от един файл с еднакво нормализирано заглавие "
+            f"({shown}). Променете заглавия или съвпаденията, преди да потвърдите.",
+        )
+
+    override_options = _match_override_options(existing_songs)
+
     st.divider()
     for index, draft in enumerate(batch):
         header = draft.filename
@@ -216,6 +295,29 @@ def render_import_tab(client: Client, openai_config: OpenAIConfig) -> None:
                 value=draft.author,
                 key=f"import_author_{index}",
             )
+            payload = _draft_import_payload(draft)
+            selected_override = st.selectbox(
+                "Съвпадение",
+                options=override_options,
+                index=_match_override_index(override_options, draft.match_override),
+                format_func=lambda value: _match_override_label(value, existing_by_id),
+                key=f"import_match_{index}",
+            )
+            if selected_override == MATCH_OVERRIDE_AUTO:
+                draft.match_override = None
+            elif selected_override == MATCH_OVERRIDE_NEW:
+                draft.match_override = MATCH_OVERRIDE_NEW
+            else:
+                draft.match_override = selected_override
+
+            resolved = resolve_import_action(
+                lyrics=payload["lyrics"],
+                normalized_title=payload["normalized_title"],
+                existing_by_normalized=existing_by_normalized,
+                existing_songs_by_id=existing_by_id,
+                override=draft.match_override,
+            )
+            st.caption(import_action_preview_label(resolved, existing_songs_by_id=existing_by_id))
             st.text_area(
                 "Разпознати секции",
                 value=_format_sections_preview(draft.lyrics),
@@ -226,36 +328,40 @@ def render_import_tab(client: Client, openai_config: OpenAIConfig) -> None:
         st.divider()
 
     batch_has_unknown = bool(_batch_unknown_markers(batch))
+    batch_has_duplicate_titles = bool(duplicate_norms)
 
     confirm_col, cancel_col = st.columns(2)
     with confirm_col:
         if st.button(
             "Потвърди и запиши",
             type="primary",
-            disabled=batch_has_unknown,
+            disabled=batch_has_unknown or batch_has_duplicate_titles,
         ):
-            rows = [
-                build_song_row(
-                    title=item.title.strip() or _filename_stem(item.filename),
-                    author=item.author.strip() or None,
-                    lyrics=item.lyrics,
-                    raw_text=item.raw_text,
-                )
-                for item in batch
-            ]
+            drafts_payload = [_draft_import_payload(item) for item in batch]
+            actions = plan_import_actions(
+                drafts_payload,
+                existing_by_normalized=existing_by_normalized,
+                existing_songs_by_id=existing_by_id,
+            )
             try:
-                inserted = insert_songs(client, rows)
+                inserted_count, updated_count, skipped_count, for_analysis = apply_import_actions(
+                    client,
+                    actions,
+                )
                 if pending_aliases:
                     upsert_marker_aliases(client, pending_aliases)
             except Exception as exc:
                 st.error(f"Неуспешен запис в базата: {exc}")
             else:
-                done, failed = run_song_analysis_batch(client, inserted, openai_config)
+                done, failed = run_song_analysis_batch(client, for_analysis, openai_config)
                 _clear_import_session()
-                msg = f"Записани са {len(rows)} песни."
+                msg = (
+                    f"Нови: {inserted_count}, обновени: {updated_count}, "
+                    f"пропуснати: {skipped_count}."
+                )
                 if done or failed:
                     msg += f" Анализ: {done} готови, {failed} неуспешни."
-                elif inserted:
+                elif for_analysis:
                     msg += " Анализът не стартира (проверете OpenAI secrets)."
                 st.success(msg)
                 st.rerun()
@@ -266,3 +372,7 @@ def render_import_tab(client: Client, openai_config: OpenAIConfig) -> None:
 
     if batch_has_unknown:
         st.caption("Потвърждението е изключено, докато всички маркери имат зададен тип.")
+    if batch_has_duplicate_titles:
+        st.caption(
+            "Потвърждението е изключено, докато нормализираните заглавия в партидата са уникални.",
+        )
