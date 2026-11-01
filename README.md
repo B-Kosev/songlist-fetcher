@@ -51,6 +51,10 @@ Apply the migration in your Supabase SQL editor (or via the CLI):
 
 This creates the `songs` table described in PRD §3.1. Later tickets may add columns or related tables.
 
+For marker alias persistence (import preview), also apply:
+
+- File: [`supabase/migrations/002_marker_aliases.sql`](supabase/migrations/002_marker_aliases.sql)
+
 ### Run the app
 
 ```bash
@@ -65,7 +69,7 @@ On first load you see only the passcode prompt. Team passcode unlocks **Преп
 pytest
 ```
 
-Passcode verification and role resolution are covered in `tests/test_auth.py`. The lyric parser (Worship Tools `v1` / `Verse 1`, ProPresenter `slide1`, chord and `{comment}` stripping) and title normalization have fixture tests in `tests/test_parser.py` and `tests/test_songs.py`.
+Passcode verification and role resolution are covered in `tests/test_auth.py`. The lyric parser (Worship Tools `v1` / `Verse 1`, ProPresenter `slide1`, chord and `{comment}` stripping, unknown-marker detection, and saved marker aliases) and title normalization have fixture tests in `tests/test_parser.py` and `tests/test_songs.py`.
 
 ## Production deployment checklist
 

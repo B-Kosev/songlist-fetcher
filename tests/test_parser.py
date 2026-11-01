@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from worship_song_selector.parser import parse_song_text, strip_chord_brackets, strip_curly_brace_comments
+from worship_song_selector.parser import (
+    marker_alias_key,
+    parse_song_text,
+    strip_chord_brackets,
+    strip_curly_brace_comments,
+)
 from worship_song_selector.titles import normalize_title
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -125,6 +130,56 @@ def test_marker_normalization(marker, section_type, number):
 
 def test_strip_curly_brace_comments_from_line():
     assert strip_curly_brace_comments("Ред{бележка} край") == "Ред край"
+
+
+def test_unknown_marker_detected_for_unrecognised_label():
+    raw = "pre-ch\nПърви ред\nМеждинна\nОще ред\n"
+    parsed = parse_song_text(raw, filename_stem="x")
+    assert parsed.unknown_markers == frozenset({"prech", "междинна"})
+
+
+def test_marker_alias_key_is_case_insensitive_and_strips_separators():
+    assert marker_alias_key("Pre-Ch") == marker_alias_key("pre ch")
+    assert marker_alias_key("Verse 1:") == "verse1"
+
+
+def test_marker_aliases_apply_before_builtin_rules():
+    raw = "pre-ch\nПърви ред\n"
+    parsed = parse_song_text(
+        raw,
+        filename_stem="x",
+        marker_aliases={"prech": "pre_chorus"},
+    )
+    assert parsed.unknown_markers == frozenset()
+    assert [s.section_type for s in parsed.sections] == ["pre_chorus"]
+    assert parsed.sections[0].lines == ["Първи ред"]
+
+
+def test_marker_alias_ignore_line_skips_marker():
+    raw = "pre-ch\nПърви ред\n"
+    parsed = parse_song_text(
+        raw,
+        filename_stem="x",
+        marker_aliases={"prech": "ignore_line"},
+    )
+    assert parsed.sections == []
+
+
+def test_marker_alias_not_a_marker_keeps_line_as_lyric():
+    raw = "v1\nМеждинна\nПърви ред\n"
+    parsed = parse_song_text(
+        raw,
+        filename_stem="x",
+        marker_aliases={"междинна": "not_a_marker"},
+    )
+    assert parsed.unknown_markers == frozenset()
+    assert parsed.sections[0].lines == ["Междинна", "Първи ред"]
+
+
+def test_chord_line_is_not_flagged_as_unknown_marker():
+    raw = "v1\nДухът [G] мъдрост\n"
+    parsed = parse_song_text(raw, filename_stem="x")
+    assert parsed.unknown_markers == frozenset()
 
 
 def test_parse_large_file_under_three_seconds():
