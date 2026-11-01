@@ -5,7 +5,8 @@ import streamlit as st
 from worship_song_selector.auth import Role, resolve_role
 from worship_song_selector.config import load_config
 from worship_song_selector.import_ui import render_import_tab
-from worship_song_selector.songs import create_supabase_client, list_songs
+from worship_song_selector.library_ui import render_library_tab
+from worship_song_selector.songs import create_supabase_client
 
 SESSION_ROLE_KEY = "role"
 
@@ -51,35 +52,10 @@ def render_recommend_tab() -> None:
     st.info("Генерирането на сетове ще бъде добавено в следващите версии.")
 
 
-def _format_song_line(song: dict) -> str:
-    title = song["title"]
-    author = song.get("author") or "—"
-    status = song.get("analysis_status")
-    if status == "done":
-        energy = song.get("energy") or "—"
-        tags = song.get("tags") or []
-        tag_str = ", ".join(tags) if tags else "—"
-        return f"**{title}** — {author} · {energy} · {tag_str}"
-    if status == "failed":
-        return f"**{title}** — {author} · анализ неуспешен"
-    return f"**{title}** — {author} · чака анализ"
-
-
-def render_library_tab() -> None:
-    st.subheader("Библиотека")
+def render_library_tab_with_client() -> None:
     config = load_config()
     client = create_supabase_client(config.supabase)
-    try:
-        songs = list_songs(client)
-    except Exception as exc:
-        st.error(f"Неуспешна връзка с базата данни: {exc}")
-        return
-    if not songs:
-        st.write("0 songs")
-        return
-    st.caption(f"{len(songs)} songs")
-    for song in songs:
-        st.markdown(_format_song_line(song))
+    render_library_tab(client)
 
 
 def render_admin_import_tab() -> None:
@@ -106,7 +82,7 @@ def render_main_app(role: Role) -> None:
         with tab_recommend:
             render_recommend_tab()
         with tab_library:
-            render_library_tab()
+            render_library_tab_with_client()
         with tab_import:
             render_admin_import_tab()
         with tab_settings:
@@ -116,7 +92,7 @@ def render_main_app(role: Role) -> None:
         with tab_recommend:
             render_recommend_tab()
         with tab_library:
-            render_library_tab()
+            render_library_tab_with_client()
 
 
 def main() -> None:

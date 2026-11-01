@@ -35,6 +35,19 @@ def list_songs(client: Client) -> list[dict[str, Any]]:
     return list(response.data or [])
 
 
+def list_songs_for_library(client: Client) -> list[dict[str, Any]]:
+    response = (
+        client.table("songs")
+        .select(
+            "id, title, author, energy, tags, lyrics, summary, "
+            "scripture_refs, analysis_status",
+        )
+        .order("title")
+        .execute()
+    )
+    return list(response.data or [])
+
+
 def insert_songs(client: Client, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return []
