@@ -55,6 +55,19 @@ def list_songs_for_library(client: Client) -> list[dict[str, Any]]:
     return list(response.data or [])
 
 
+def list_analysed_songs_for_recommendation(client: Client) -> list[dict[str, Any]]:
+    response = (
+        client.table("songs")
+        .select(
+            "id, title, author, energy, tags, scripture_refs, summary",
+        )
+        .eq("analysis_status", "done")
+        .order("title")
+        .execute()
+    )
+    return list(response.data or [])
+
+
 def fetch_songs_for_title_clash_check(client: Client) -> list[dict[str, Any]]:
     response = (
         client.table("songs")
