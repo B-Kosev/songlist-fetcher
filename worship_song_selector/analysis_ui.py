@@ -18,6 +18,8 @@ def run_song_analysis_batch(
     client: Client,
     songs: list[dict[str, Any]],
     openai_config: OpenAIConfig,
+    *,
+    overwrite_hand_edits: bool = True,
 ) -> tuple[int, int]:
     if not songs:
         return 0, 0
@@ -32,7 +34,12 @@ def run_song_analysis_batch(
     progress = st.progress(0.0, text="Анализ на песни…")
 
     def apply_result(song_id: str, analysis: SongAnalysis | None) -> None:
-        save_analysis_result(client, song_id, analysis=analysis)
+        save_analysis_result(
+            client,
+            song_id,
+            analysis=analysis,
+            overwrite_hand_edits=overwrite_hand_edits,
+        )
 
     def on_progress(completed: int, total: int) -> None:
         progress.progress(completed / total, text=f"Анализ: {completed}/{total}")

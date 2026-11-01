@@ -31,6 +31,7 @@ class ImportAction:
     kind: ImportActionKind
     song_id: str | None = None
     row: dict[str, Any] | None = None
+    overwrite_hand_edits: bool = False
 
 
 def lyrics_equal(
@@ -151,5 +152,12 @@ def plan_import_actions(
             "raw_text": draft["raw_text"],
             "analysis_status": "pending",
         }
-        actions.append(ImportAction(kind=kind, song_id=song_id, row=row if kind != ImportActionKind.SKIP else None))
+        actions.append(
+            ImportAction(
+                kind=kind,
+                song_id=song_id,
+                row=row if kind != ImportActionKind.SKIP else None,
+                overwrite_hand_edits=bool(draft.get("overwrite_hand_edits")),
+            ),
+        )
     return actions

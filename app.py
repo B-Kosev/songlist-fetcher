@@ -6,6 +6,7 @@ from worship_song_selector.auth import Role, resolve_role
 from worship_song_selector.config import load_config
 from worship_song_selector.import_ui import render_import_tab
 from worship_song_selector.library_ui import render_library_tab
+from worship_song_selector.settings_ui import render_settings_tab
 from worship_song_selector.songs import create_supabase_client
 
 SESSION_ROLE_KEY = "role"
@@ -52,10 +53,14 @@ def render_recommend_tab() -> None:
     st.info("Генерирането на сетове ще бъде добавено в следващите версии.")
 
 
-def render_library_tab_with_client() -> None:
+def render_library_tab_with_client(role: Role) -> None:
     config = load_config()
     client = create_supabase_client(config.supabase)
-    render_library_tab(client)
+    render_library_tab(
+        client,
+        role=role,
+        openai_config=config.openai if role is Role.ADMIN else None,
+    )
 
 
 def render_admin_import_tab() -> None:
@@ -64,9 +69,10 @@ def render_admin_import_tab() -> None:
     render_import_tab(client, config.openai)
 
 
-def render_settings_tab() -> None:
-    st.subheader("Настройки")
-    st.info("Настройките на шаблона за поток ще бъдат добавени в следващите версии.")
+def render_settings_tab_with_client() -> None:
+    config = load_config()
+    client = create_supabase_client(config.supabase)
+    render_settings_tab(client, config.openai)
 
 
 def render_main_app(role: Role) -> None:
@@ -82,17 +88,17 @@ def render_main_app(role: Role) -> None:
         with tab_recommend:
             render_recommend_tab()
         with tab_library:
-            render_library_tab_with_client()
+            render_library_tab_with_client(role)
         with tab_import:
             render_admin_import_tab()
         with tab_settings:
-            render_settings_tab()
+            render_settings_tab_with_client()
     else:
         tab_recommend, tab_library = st.tabs(["Препоръка", "Библиотека"])
         with tab_recommend:
             render_recommend_tab()
         with tab_library:
-            render_library_tab_with_client()
+            render_library_tab_with_client(role)
 
 
 def main() -> None:

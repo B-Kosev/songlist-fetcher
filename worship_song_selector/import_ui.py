@@ -13,6 +13,7 @@ from worship_song_selector.analysis_ui import (
 from worship_song_selector.config import OpenAIConfig
 from worship_song_selector.marker_aliases import fetch_marker_aliases, upsert_marker_aliases
 from worship_song_selector.import_matching import (
+    ImportActionKind,
     batch_duplicate_normalized_titles,
     import_action_preview_label,
     plan_import_actions,
@@ -48,6 +49,7 @@ class ImportDraft:
     lyrics: list[dict[str, Any]]
     unknown_markers: frozenset[str] = field(default_factory=frozenset)
     match_override: str | None = None
+    overwrite_hand_edits: bool = False
 
 
 def _draft_normalized_title(draft: ImportDraft) -> str:
@@ -72,6 +74,7 @@ def _draft_import_payload(draft: ImportDraft) -> dict[str, Any]:
         "lyrics": draft.lyrics,
         "raw_text": draft.raw_text,
         "override": draft.match_override,
+        "overwrite_hand_edits": draft.overwrite_hand_edits,
     }
 
 
@@ -318,6 +321,17 @@ def render_import_tab(client: Client, openai_config: OpenAIConfig) -> None:
                 override=draft.match_override,
             )
             st.caption(import_action_preview_label(resolved, existing_songs_by_id=existing_by_id))
+            target_id = resolved.song_id
+            if (
+                resolved.kind == ImportActionKind.UPDATE
+                and target_id
+                and existing_by_id.get(target_id, {}).get("tags_edited")
+            ):
+                draft.overwrite_hand_edits = st.checkbox(
+                    "Презапиши моите ръчни редакции на AI полетата",
+                    value=draft.overwrite_hand_edits,
+                    key=f"import_overwrite_{index}",
+                )
             st.text_area(
                 "Разпознати секции",
                 value=_format_sections_preview(draft.lyrics),
