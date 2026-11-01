@@ -65,7 +65,7 @@ On first load you see only the passcode prompt. Team passcode unlocks **Преп
 pytest
 ```
 
-Passcode verification and role resolution are covered in `tests/test_auth.py`.
+Passcode verification and role resolution are covered in `tests/test_auth.py`. The Worship Tools–style lyric parser and title normalization have fixture tests in `tests/test_parser.py` and `tests/test_songs.py`.
 
 ## Production deployment checklist
 

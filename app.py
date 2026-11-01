@@ -4,7 +4,8 @@ import streamlit as st
 
 from worship_song_selector.auth import Role, resolve_role
 from worship_song_selector.config import load_config
-from worship_song_selector.songs import count_songs, create_supabase_client
+from worship_song_selector.import_ui import render_import_tab
+from worship_song_selector.songs import create_supabase_client, list_songs
 
 SESSION_ROLE_KEY = "role"
 
@@ -55,16 +56,23 @@ def render_library_tab() -> None:
     config = load_config()
     client = create_supabase_client(config.supabase)
     try:
-        total = count_songs(client)
+        songs = list_songs(client)
     except Exception as exc:
         st.error(f"Неуспешна връзка с базата данни: {exc}")
         return
-    st.write(f"{total} songs")
+    if not songs:
+        st.write("0 songs")
+        return
+    st.caption(f"{len(songs)} songs")
+    for song in songs:
+        author = song.get("author") or "—"
+        st.write(f"**{song['title']}** — {author}")
 
 
-def render_import_tab() -> None:
-    st.subheader("Импорт")
-    st.info("Импортът на песни ще бъде добавен в следващите версии.")
+def render_admin_import_tab() -> None:
+    config = load_config()
+    client = create_supabase_client(config.supabase)
+    render_import_tab(client)
 
 
 def render_settings_tab() -> None:
@@ -87,7 +95,7 @@ def render_main_app(role: Role) -> None:
         with tab_library:
             render_library_tab()
         with tab_import:
-            render_import_tab()
+            render_admin_import_tab()
         with tab_settings:
             render_settings_tab()
     else:
